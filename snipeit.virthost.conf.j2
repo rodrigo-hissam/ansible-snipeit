@@ -1,0 +1,15 @@
+# Managed by Ansible
+
+<VirtualHost *:80>"
+ServerAdmin webmaster@localhost"
+    <Directory {{webdir}}/{{app_name}}/public>"
+        Allow From All"
+        AllowOverride All"
+        Options +Indexes"
+   </Directory>"
+    DocumentRoot {{webdir}}/{{app_name}}/public"
+    ServerName {{fqdn}}"
+        ErrorLog /var/log/httpd/snipeIT.error.log"
+        CustomLog /var/log/access.log combined"
+</VirtualHost>"
+

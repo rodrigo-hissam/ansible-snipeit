@@ -1,0 +1,176 @@
+---
+
+- name: Deploy Snipe IT
+  hosts: inventory
+  remote_user: ansible
+
+
+# Modify the variables according to your needs.
+  vars:
+    # General
+    # Use the machines fqdn or set you chosen IP addresss
+    fqdn: '{{ ansible_fqdn }}'
+    webdir: '/var/www/html'
+    apache_file:
+    owner: 'apache'
+    group: 'apache'
+    
+    # App 
+    app_name: 'snipeit'
+    app_user: 'snipeit'
+    app_user_pwd: 'Changetoyourdesiredpassword'
+    
+    # Set the final root password in the .my.conf file
+    mariadb_root_pwd: 'thisisatemporaryrootpasswordnoneedtochange'
+    
+  
+  tasks:
+
+    - name: Adding epel-release and IUS repositories
+      yum:
+        name: '{{item}}'
+        state: latest
+      with_items:
+        - epel-release
+        - https://centos{{ansible_distribution_major_version}}.iuscommunity.org/ius-release.rpm
+      become: true
+
+    - name: Importing IUS-COMMUNITY-GPG-KEY
+      rpm_key:
+        state: present
+        key: '/etc/pki/rpm-gpg/IUS-COMMUNITY-GPG-KEY'
+      become: true
+
+    - name: Installing PHP 7.0 and other app dependencies
+      yum:
+        name: '{{item}}'
+        state: installed
+      with_items:
+        - httpd
+        - mariadb-server
+        - git
+        - unzip
+        - php71u
+        - php71u-mysqlnd
+        - php71u-bcmath
+        - php71u-cli
+        - php71u-common
+        - php71u-embedded
+        - php71u-gd
+        - php71u-mbstring
+        - php71u-mcrypt
+        - php71u-ldap
+        - php71u-json
+        - php71u-simplexml
+        - MySQL-python
+        - curl
+      become: yes
+
+    - name: Starting mariadb and httpd service and enabling them at boot
+      service: 
+        name: '{{item }}'
+        state: started
+        enabled: true
+      with_items:
+        - httpd.service
+        - mariadb.service
+      become: true
+
+    # MySQL server install with default login_user of 'root' and no password. To secure this
+    # user as part of an idempotent playbook, you must create at leaset two tasks: the first
+    # must change the root user's password, without providing any login_user/login_password
+    # details. The second must drop a ~/.my.cnf file containing the new root credentials.
+    # Subsequent runs of the playbook will then succeed by reading the new credentials from
+    # this file.
+
+    # 1st task - updating mariadb root user.
+    - name: Updating root password for all accounts
+      mysql_user:
+        name: root
+        host: '{{ item }}'
+        password: '{{ mariadb_root_pwd }}'
+      with_items:
+        - 127.0.0.1
+        - ::1
+        - localhost
+      become: true
+    
+    # 2nd task - copying .my.cnf template to /root/
+    - name: Copying .my.cnf with root passwords
+      template:
+        src: my.cnf.j2
+        dest: /root/.my.cnf 
+        owner: root
+        group: root
+        mode: 0600
+      become: true
+      
+    # Securing steps for Mariadb 
+    - name: Deleting Mariadb anonymous users for all accounts
+      mysql_user:
+        name: ''
+        host_all: yes
+        state: absent
+      become: true
+
+    - name: Disallow db remote root login
+      command: 'mysql -NBe "{{ item }}"'
+      with_items:
+        - DELETE FROM mysql.user WHERE User= 'root' AND Host NOT IN ('localhost', '127.0.0.1', '::1')
+      changed_when: false
+      become: true
+
+    - name: Removing the Mariadb test database
+      mysql_db:
+        name: 'test'
+        state: absent
+      become: true
+
+    - name: Creating db for SnipeIT
+      mysql_db:
+        name: "{{app_name}}"
+        state: present
+      become: yes
+
+    - name: Creating user for SnipeIT db
+      mysql_user:
+        name: "{{ app_user}}"
+        password: '{{app_user_pwd}}'
+        priv: '{{app_name}}.*:ALL,GRANT'
+        state: present
+      become: yes
+
+    - name: Setting SnipeIT virtual host file
+      template:
+        src: snipeit.virthost.conf.j2
+        dest: '/etc/httpd/conf.d/{{ app_name }}.conf'
+      become: true
+
+    - name: Adding fqdn to hosts file
+      lineinfile:
+        path: '/etc/hosts'
+        regexp: '^127.0.0.1   localhost'
+        state: present
+        line: '127.0.0.1   {{fqdn}} localhost'
+      become: true
+
+    # Installation of SnipeIT
+    - name: Cloning SnipeIT from github to the web directory
+      git:
+        repo: https://github.com/snipe/snipe-it 
+        clone: yes
+        dest: '{{ webdir}}/{{app_name}}'
+        update: no
+      notify: 
+        - restart httpd
+      become: true
+  
+  # Handlers
+  handlers:
+    - name: restart httpd
+      service:
+        name: httpd
+        state: restarted
+      become: true
+    
+
