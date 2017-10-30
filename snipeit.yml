@@ -19,10 +19,15 @@
     app_name: 'snipeit'
     app_user: 'snipeit'
     app_user_pwd: 'Changetoyourdesiredpassword'
+    app_locale: 'en'
+    app_timezone: 'America/Mexico_City'
     
-    # Set the final root password in the .my.conf file
+    # MySql
     mariadb_root_pwd: 'thisisatemporaryrootpasswordnoneedtochange'
     
+    # Php
+    php_executable: 'php'
+    composer_path: '/usr/local/bin/composer'
   
   tasks:
 
@@ -64,6 +69,9 @@
         - php71u-simplexml
         - MySQL-python
         - curl
+        - libselinux-python
+        - libsemanage-python
+        - policycoreutils-python
       become: yes
 
     - name: Starting mariadb and httpd service and enabling them at boot
@@ -164,7 +172,106 @@
       notify: 
         - restart httpd
       become: true
+
+    - name: Setting up .env file
+      template:
+        src: env.j2
+        dest: '{{web_dir}}/{{app_name}}/.env'
+        mode: 0750
+      become: true
+      register: env
+
+    - name: Setting app directory owner/group
+      file:
+        path: '{{web_dir}}/{{app_name}}'
+        owner: '{{owner}}'
+        group: '{{group}}'
+        mode: 0750
+        state: directory
   
+    # Composer install
+    - name: Checking if composer is installed
+      stat: 
+        path: '{{composer_path}}'
+      register: composer_installed
+
+    - name: Downloading the composer installer 
+      get_url:
+        url: 'https://getcomposer.org/installer'
+        dest: '/tmp/composer-installer.php'
+        mode: 0750
+      when: not composer_installed.stat.exists
+
+    - name: Running composer installer
+      command: '{{php_executable}} composer-installer.php'
+      args:
+        chdir: /tmp
+      when: not composer_installed.stat.exists
+
+    - name: Moving composer into our path to execute it globally
+      command: "mv /tmp/composer.phar '{{composer_path}}' "
+      args:
+        creates: '{{composer_path}}'
+      when: not composer_installed.stat.exists
+      become: true
+
+    - name: Downloading Snipe-IT dependencies via composer
+      composer:
+        command: install 
+        no_dev: True
+        optimize_autoloader: True
+        prefer_source: True
+        working_dir: '{{web_dir}}/{{app_name}}'
+      become: true
+      become_user: 'apache'
+
+    - name: Setting permission for publicly accesible folders
+      file:
+        path: '{{web_dir}}/{{app_name}}/{{item}}'
+        owner: '{{owner}}'
+        group: '{{group}}'
+        mode: 0755
+        state: directory
+      with_items: 
+        - 'storage'
+        - 'public/uploads'
+      become: true
+
+    - name: Generating the application key
+      shell: '{{php_executable}} artisan key:generate --force'
+      args:
+        chdir: "{{webdir}}/{{ansible_hostname}}"
+      when: env.changed
+      become: true
+      become_user: apache
+
+    - name: Running artisan migrate
+      shell: '{{php_executable}} artisan migrate --force'
+      args:
+        chdir: "{{webdir}}/{{ansible_hostname}}"
+      when: env.changed
+      become: true
+      become_user: apache
+  
+    - name: Setting SELinux boolean for ldap integration
+      seboolean:
+        name: httpd_can_connect_ldap 
+        persistent: yes
+        state: yes
+      become: true
+
+    - name: Setting SELinux context type for web server process
+      sefcontext:
+        target: '{{web_dir}}/{{app_name}}/'
+        setype: httpd_sys_script_rw_t
+        state: present
+      become: true
+    
+    - name: Restarting apache
+      notify:
+       - restart httpd
+
+       
   # Handlers
   handlers:
     - name: restart httpd
