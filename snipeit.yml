@@ -250,7 +250,7 @@
         name: httpd_can_connect_ldap 
         persistent: yes
         state: yes      
-      when: sestatus == 'Enabled'
+      when: sestatus == 'Enforcing'
 
     - name: Setting SELinux context type for web server process
       sefcontext:
@@ -259,7 +259,7 @@
         state: present      
       notify:
        - restart httpd
-      when: sestatus == 'Enabled'
+      when: sestatus == 'Enforcing'
     
     - name: Restarting httpd
       command: echo "Restarting..."
