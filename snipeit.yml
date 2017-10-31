@@ -1,8 +1,8 @@
 ---
 
 - name: Deploy Snipe IT
-  hosts: inventory
-  remote_user: ansible
+  hosts: all
+  remote_user: root
   become: true
 
 
@@ -33,7 +33,7 @@
   tasks:
 
     - name: Adding epel-release and IUS repositories
-      package:
+      yum:
         name: '{{item}}'
         state: latest
       with_items:
@@ -46,7 +46,7 @@
         key: '/etc/pki/rpm-gpg/IUS-COMMUNITY-GPG-KEY'
       
     - name: Installing PHP 7.0 and other app dependencies
-      package:
+      yum:
         name: '{{item}}'
         state: installed
       with_items:
@@ -71,6 +71,7 @@
         - libselinux-python
         - libsemanage-python
         - policycoreutils-python
+        - sudo 
       become: yes
 
     - name: Starting mariadb and httpd service and enabling them at boot
@@ -230,14 +231,14 @@
     - name: Generating the application key
       command: '{{php_executable}} artisan key:generate --force'
       args:
-        chdir: "{{webdir}}/{{ansible_hostname}}"
+        chdir: "{{webdir}}/{{app_name}}"
       when: env.changed      
       become_user: '{{owner}}'
 
     - name: Running artisan migrate
       command: '{{php_executable}} artisan migrate --force'
       args:
-        chdir: "{{webdir}}/{{ansible_hostname}}"
+        chdir: "{{webdir}}/{{app_name}}"
       when: env.changed      
       become_user: '{{owner}}'
 
