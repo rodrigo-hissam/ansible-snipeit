@@ -33,7 +33,7 @@
   tasks:
 
     - name: Adding epel-release and IUS repositories
-      yum:
+      package:
         name: '{{item}}'
         state: latest
       with_items:
@@ -46,7 +46,7 @@
         key: '/etc/pki/rpm-gpg/IUS-COMMUNITY-GPG-KEY'
       
     - name: Installing PHP 7.0 and other app dependencies
-      yum:
+      package:
         name: '{{item}}'
         state: installed
       with_items:
